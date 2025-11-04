@@ -2,6 +2,8 @@
 
 Render Handlebars templates directly inside VS Code. Every `.hbs` or `.handlebars` file can be paired with a JavaScript module whose filename is the template filename plus `.js`; that module prepares input data, registers helpers/partials, and can perform optional pre/post processing before the preview updates.
 
+![Handlebars Preview Plus demo](./shoecase.webp)
+
 ## Feature Highlights
 
 - Live webview preview that tracks the template, companion module, and any extra files you opt into.
