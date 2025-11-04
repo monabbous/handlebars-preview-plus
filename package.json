@@ -3,7 +3,7 @@
   "displayName": "Handlebars Preview Plus",
   "publisher": "Nabous",
   "description": "Preview Handlebars templates using companion JS modules",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "icon": "media/icon.png",
   "repository": {
     "type": "git",
