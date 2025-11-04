@@ -1,0 +1,13 @@
+{{> header}}
+
+<section class="line-items">
+  {{#each items}}
+    <article>
+      <h2>{{name}}</h2>
+      <p>{{description}}</p>
+      <strong>{{formatPrice total}}</strong>
+    </article>
+  {{/each}}
+</section>
+
+{{> footer}}

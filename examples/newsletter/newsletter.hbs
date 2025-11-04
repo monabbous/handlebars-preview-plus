@@ -1,0 +1,31 @@
+<header>
+  <h1>{{subject}}</h1>
+</header>
+
+{{!-- markdown block renders tables and bullet lists --}}
+{{#markdown}}
+  # Weekly Digest
+
+  {{#each highlights}}
+    - **{{title}}** — {{summary}}
+  {{/each}}
+
+  {{#if isActive}}
+    > The account is active.
+  {{else}}
+    > The account is not active.
+  {{/if}}
+{{/markdown}}
+
+<section>
+  {{!-- complex table rendered via markdown helper --}}
+  {{#markdown}}
+    ### Product List
+
+    | Name | Price | Features |
+    | ---- | ----- | -------- |
+    {{#each products}}
+    | {{name}} | {{price}} | {{features.join(", ")}} |
+    {{/each}}
+  {{/markdown}}
+</section>

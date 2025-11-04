@@ -1,0 +1,93 @@
+{
+  "name": "handlebars-preview-plus",
+  "displayName": "Handlebars Preview Plus",
+  "description": "Preview Handlebars templates using companion JS modules",
+  "version": "0.0.1",
+  "icon": "media/icon.png",
+  "engines": {
+    "vscode": "^1.105.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "handlebars-preview-plus.openPreview",
+        "title": "Open Handlebars Preview Plus",
+        "category": "Handlebars Preview Plus",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "handlebars-preview-plus.refreshPreview",
+        "title": "Refresh Handlebars Preview Plus",
+        "category": "Handlebars Preview Plus"
+      }
+    ],
+    "configuration": [
+      {
+        "title": "Handlebars Preview Plus",
+        "properties": {
+          "handlebars-preview-plus.enableDebugLogging": {
+            "type": "boolean",
+            "default": false,
+            "description": "Enable verbose logging to the Handlebars Preview Plus output channel."
+          }
+        }
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "handlebars-preview-plus.openPreview",
+          "when": "resourceExtname == .hbs || resourceExtname == .handlebars",
+          "group": "navigation@99"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "handlebars-preview-plus.openPreview",
+          "when": "resourceExtname == .hbs || resourceExtname == .handlebars",
+          "group": "navigation@99"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "handlebars-preview-plus.openPreview",
+          "when": "resourceExtname == .hbs || resourceExtname == .handlebars",
+          "group": "navigation@99"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "webpack",
+    "watch": "webpack --watch",
+    "package": "webpack --mode production --devtool hidden-source-map",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.105.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "@typescript-eslint/eslint-plugin": "^8.45.0",
+  "@typescript-eslint/parser": "^8.45.0",
+    "eslint": "^9.36.0",
+  "mocha": "^10.7.3",
+    "typescript": "^5.9.3",
+    "ts-loader": "^9.5.4",
+    "webpack": "^5.102.0",
+    "webpack-cli": "^6.0.1",
+    "@vscode/test-cli": "^0.0.11",
+    "@vscode/test-electron": "^2.5.2"
+  },
+  "dependencies": {
+    "handlebars": "^4.7.8"
+  }
+}

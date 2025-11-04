@@ -1,0 +1,20 @@
+{
+  "number": "INV-1024",
+  "currency": "USD",
+  "company": {
+    "name": "Acme Corp",
+    "address": "123 Market Street, Springfield"
+  },
+  "items": [
+    {
+      "name": "Consulting",
+      "description": "Implementation services",
+      "total": 1800
+    },
+    {
+      "name": "Support",
+      "description": "Premium support retainer",
+      "total": 600
+    }
+  ]
+}
