@@ -1,6 +1,7 @@
 {
   "name": "handlebars-preview-plus",
   "displayName": "Handlebars Preview Plus",
+  "publisher": "Nabous",
   "description": "Preview Handlebars templates using companion JS modules",
   "version": "0.0.1",
   "icon": "media/icon.png",
