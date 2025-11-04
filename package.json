@@ -4,6 +4,10 @@
   "description": "Preview Handlebars templates using companion JS modules",
   "version": "0.0.1",
   "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/monabbous/handlebars-preview-plus.git"
+  },
   "engines": {
     "vscode": "^1.105.0"
   },
