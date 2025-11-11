@@ -11,10 +11,19 @@ suite("Hot reload integration", () => {
   const invoiceDir = path.join(repoRoot, "examples", "invoice");
   const templatePath = path.join(invoiceDir, "invoice.handlebars");
   const modulePath = path.join(invoiceDir, "invoice.handlebars.js");
+  const tsDir = path.join(repoRoot, "examples", "typescript");
+  const tsTemplatePath = path.join(tsDir, "sample.hbs");
+  const tsModulePath = path.join(tsDir, "sample.hbs.ts");
 
   const context: ProcessingContext = {
     templatePath,
     modulePath,
+    workspaceFolder: repoRoot,
+  };
+
+  const tsContext: ProcessingContext = {
+    templatePath: tsTemplatePath,
+    modulePath: tsModulePath,
     workspaceFolder: repoRoot,
   };
 
@@ -57,5 +66,28 @@ suite("Hot reload integration", () => {
     const templateSource = await fs.readFile(templatePath, "utf8");
     const rendered = await renderTemplate(templateSource, recipe, context);
     assert.ok(rendered.includes(override));
+  });
+
+  test("loads TypeScript companion module with workspace tsconfig", async () => {
+    const recipe = await loadTemplateRecipe(tsModulePath, tsContext);
+    const templateSource = await fs.readFile(tsTemplatePath, "utf8");
+    const rendered = await renderTemplate(templateSource, recipe, tsContext);
+    assert.ok(rendered.includes("TypeScript Companion Module"));
+  });
+
+  test("applies TypeScript module overrides", async () => {
+    const overrideSource = `type Message = { title: string; message: string };
+export default function overridePreview() {
+  const data: Message = { title: "TS Override", message: "Dirty override" };
+  return { data };
+}`;
+
+    const recipe = await loadTemplateRecipe(tsModulePath, tsContext, {
+      moduleSource: overrideSource,
+    });
+
+    const data = recipe.data as { title?: string; message?: string };
+    assert.equal(data.title, "TS Override");
+    assert.equal(data.message, "Dirty override");
   });
 });

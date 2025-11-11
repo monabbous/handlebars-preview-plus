@@ -1,14 +1,12 @@
 import { watch as fsWatch, FSWatcher } from "node:fs";
+import * as fsPromises from "node:fs/promises";
 import * as path from "node:path";
 import * as vscode from "vscode";
 
-import {
-  MissingTemplateModuleError,
-  loadTemplateRecipe,
-} from "./templateModuleLoader";
+import { loadTemplateRecipe } from "./templateModuleLoader";
 import { renderTemplate } from "./templateRenderer";
 import { PreviewLogger } from "./logger";
-import type { ProcessingContext } from "./types";
+import type { ProcessingContext, ResolvedTemplatePreviewRecipe } from "./types";
 
 const HANDLEBARS_VIEW_TYPE = "handlebarsPreview";
 const RENDER_DEBOUNCE_MS = 200;
@@ -16,10 +14,11 @@ const RENDER_DEBOUNCE_MS = 200;
 interface PreviewSession {
   readonly key: string;
   readonly templateUri: vscode.Uri;
-  readonly modulePath: string;
-  readonly moduleUri: vscode.Uri;
   readonly panel: vscode.WebviewPanel;
-  moduleWatcher?: vscode.FileSystemWatcher;
+  readonly moduleCandidates: string[];
+  readonly trackedModuleUris: Set<string>;
+  moduleWatchers: vscode.Disposable[];
+  activeModulePath?: string;
   extraWatchers: vscode.Disposable[];
   fsWatchers: FSWatcher[];
   renderTimer?: NodeJS.Timeout;
@@ -53,7 +52,7 @@ export class HandlebarsPreviewManager implements vscode.Disposable {
         if (relatedSessions) {
           for (const activeSession of relatedSessions) {
             this.logger.debug("Companion module change detected", {
-              module: activeSession.modulePath,
+              module: event.document.uri.fsPath,
             });
             this.scheduleRender(activeSession, "module-document-change");
           }
@@ -109,24 +108,25 @@ export class HandlebarsPreviewManager implements vscode.Disposable {
     });
     const panel = this.createWebviewPanel(document);
 
-    const modulePath = this.deriveModulePath(document.uri);
+    const moduleCandidates = this.deriveModuleCandidates(document.uri);
 
     session = {
       key,
       templateUri: document.uri,
-      modulePath,
-      moduleUri: vscode.Uri.file(modulePath),
       panel,
+      moduleCandidates,
+      trackedModuleUris: new Set(),
+      moduleWatchers: [],
       extraWatchers: [],
       fsWatchers: [],
       trackedPartials: new Set(),
     };
 
     this.sessions.set(key, session);
-    this.trackModuleSession(session);
+    this.trackModuleSessions(session);
     panel.onDidDispose(() => this.disposeSession(session!));
 
-    this.registerModuleWatcher(session);
+    this.registerModuleWatchers(session);
     panel.webview.html = this.renderPlaceholderHtml(
       "Rendering Handlebars Preview Plus…"
     );
@@ -206,7 +206,6 @@ export class HandlebarsPreviewManager implements vscode.Disposable {
   }
 
   private async render(session: PreviewSession): Promise<void> {
-    const context = this.createProcessingContext(session);
     let document: vscode.TextDocument;
 
     try {
@@ -218,21 +217,28 @@ export class HandlebarsPreviewManager implements vscode.Disposable {
     }
 
     const templateContent = document.getText();
-    const moduleDocument = this.findOpenDocument(session.moduleUri);
-    const moduleSourceOverride =
-      moduleDocument && moduleDocument.isDirty
-        ? moduleDocument.getText()
-        : undefined;
+    const dirtyOverrides = this.collectDirtyDocumentOverrides();
+
+    const moduleSelection = await this.resolveCompanionModule(
+      session,
+      dirtyOverrides
+    );
+    session.activeModulePath = moduleSelection?.path;
+
+    const context = this.createProcessingContext(
+      session,
+      moduleSelection?.path
+    );
 
     try {
-      const recipe = await loadTemplateRecipe(
-        session.modulePath,
-        context,
-        {
-          moduleSource: moduleSourceOverride,
-          partialSourceOverrides: this.collectDirtyDocumentOverrides(),
-        }
-      );
+      const recipe = moduleSelection
+        ? await loadTemplateRecipe(moduleSelection.path, context, {
+            moduleSource: moduleSelection.source,
+            partialSourceOverrides: dirtyOverrides,
+            workspaceFolder: context.workspaceFolder,
+          })
+        : this.createDefaultRecipe();
+
       this.updateAdditionalWatchers(
         session,
         recipe.watchFiles,
@@ -245,19 +251,11 @@ export class HandlebarsPreviewManager implements vscode.Disposable {
       session.panel.webview.html = this.wrapWithDocument(html, title);
       this.logger.debug("Render completed", {
         template: session.templateUri.fsPath,
-        module: session.modulePath,
+        module: session.activeModulePath,
         watchFiles: recipe.watchFiles.length,
         partials: Object.keys(recipe.partials).length,
       });
     } catch (error) {
-      if (error instanceof MissingTemplateModuleError) {
-        this.logger.debug("Missing companion module", {
-          module: error.modulePath,
-        });
-        this.showMissingModule(session, error.modulePath);
-        return;
-      }
-
       this.logger.error(error as Error, "Render pipeline failed");
       this.showError(session, error as Error);
     }
@@ -274,37 +272,54 @@ export class HandlebarsPreviewManager implements vscode.Disposable {
     return vscode.workspace.openTextDocument(uri);
   }
 
-  private findOpenDocument(uri: vscode.Uri): vscode.TextDocument | undefined {
-    return vscode.workspace.textDocuments.find(
-      (doc) => doc.uri.toString() === uri.toString()
-    );
-  }
-
-  private createProcessingContext(session: PreviewSession): ProcessingContext {
+  private createProcessingContext(
+    session: PreviewSession,
+    modulePathForContext?: string
+  ): ProcessingContext {
     const workspaceFolder = vscode.workspace.getWorkspaceFolder(
       session.templateUri
     )?.uri.fsPath;
+    const fallbackModulePath =
+      modulePathForContext ??
+      session.activeModulePath ??
+      session.moduleCandidates[0] ??
+      `${session.templateUri.fsPath}.js`;
     return {
       templatePath: session.templateUri.fsPath,
-      modulePath: session.modulePath,
+      modulePath: fallbackModulePath,
       workspaceFolder,
     };
   }
 
-  private deriveModulePath(templateUri: vscode.Uri): string {
+  private deriveModuleCandidates(templateUri: vscode.Uri): string[] {
     const templatePath = templateUri.fsPath;
-    return `${templatePath}.js`;
+    const candidates = [`${templatePath}.js`, `${templatePath}.ts`];
+    return Array.from(new Set(candidates.map((candidate) => path.normalize(candidate))));
   }
 
-  private registerModuleWatcher(session: PreviewSession): void {
-    session.moduleWatcher?.dispose();
+  private registerModuleWatchers(session: PreviewSession): void {
+    for (const disposable of session.moduleWatchers) {
+      disposable.dispose();
+    }
+    session.moduleWatchers = [];
 
-    const moduleDir = path.dirname(session.modulePath);
-    const pattern = new vscode.RelativePattern(
-      vscode.Uri.file(moduleDir),
-      path.basename(session.modulePath)
+    for (const candidate of session.moduleCandidates) {
+      const watcher = this.createModuleWatcher(session, candidate);
+      if (watcher) {
+        session.moduleWatchers.push(watcher);
+      }
+    }
+  }
+
+  private createModuleWatcher(
+    session: PreviewSession,
+    modulePath: string
+  ): vscode.Disposable | undefined {
+    const moduleDir = path.dirname(modulePath);
+    const fileName = path.basename(modulePath);
+    const watcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(vscode.Uri.file(moduleDir), fileName)
     );
-    const watcher = vscode.workspace.createFileSystemWatcher(pattern);
 
     const rerender = () => this.scheduleRender(session, "module-change", true);
     const subscriptions = [
@@ -313,11 +328,51 @@ export class HandlebarsPreviewManager implements vscode.Disposable {
       watcher.onDidDelete(() => rerender()),
     ];
 
-    session.moduleWatcher = watcher;
-    session.extraWatchers.push(watcher, ...subscriptions);
     this.logger.debug("Module watcher registered", {
-      module: session.modulePath,
+      module: modulePath,
     });
+    return vscode.Disposable.from(watcher, ...subscriptions);
+  }
+
+  private async resolveCompanionModule(
+    session: PreviewSession,
+    overrides: Record<string, string>
+  ): Promise<{ path: string; source?: string } | undefined> {
+    for (const candidate of session.moduleCandidates) {
+      const normalized = path.normalize(candidate);
+      const override = overrides[normalized];
+      if (override !== undefined) {
+        return { path: normalized, source: override };
+      }
+
+      if (await this.fileExists(normalized)) {
+        return { path: normalized };
+      }
+    }
+
+    return undefined;
+  }
+
+  private async fileExists(filePath: string): Promise<boolean> {
+    try {
+      await fsPromises.access(filePath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private createDefaultRecipe(): ResolvedTemplatePreviewRecipe {
+    return {
+      title: undefined,
+      data: {},
+      helpers: {},
+      partials: {},
+      preprocess: undefined,
+      postprocess: undefined,
+      watchFiles: [],
+      partialFiles: {},
+    };
   }
 
   private updateAdditionalWatchers(
@@ -334,8 +389,6 @@ export class HandlebarsPreviewManager implements vscode.Disposable {
 
     session.extraWatchers = [];
     session.fsWatchers = [];
-
-    this.registerModuleWatcher(session);
 
     this.untrackAllPartials(session);
     session.trackedPartials = new Set();
@@ -426,14 +479,6 @@ export class HandlebarsPreviewManager implements vscode.Disposable {
     }
   }
 
-  private showMissingModule(session: PreviewSession, modulePath: string): void {
-    const message = [
-      "No companion data module found for this template.",
-      `Expected module path: ${modulePath}`,
-    ].join("\n");
-    session.panel.webview.html = this.renderPlaceholderHtml(message);
-  }
-
   private showError(session: PreviewSession, error: Error): void {
     const detail = error.stack ?? error.message ?? String(error);
     session.panel.webview.html = this.wrapWithDocument(
@@ -504,7 +549,9 @@ export class HandlebarsPreviewManager implements vscode.Disposable {
       clearTimeout(session.renderTimer);
     }
 
-    session.moduleWatcher?.dispose();
+    for (const disposable of session.moduleWatchers) {
+      disposable.dispose();
+    }
     for (const disposable of session.extraWatchers) {
       disposable.dispose();
     }
@@ -513,33 +560,38 @@ export class HandlebarsPreviewManager implements vscode.Disposable {
     }
 
     this.sessions.delete(session.key);
-    this.untrackModuleSession(session);
+    this.untrackModuleSessions(session);
     this.untrackAllPartials(session);
     this.logger.debug("Preview session disposed", {
       template: session.templateUri.fsPath,
     });
   }
 
-  private trackModuleSession(session: PreviewSession): void {
-    const key = session.moduleUri.toString();
-    let bucket = this.moduleSessionIndex.get(key);
-    if (!bucket) {
-      bucket = new Set();
-      this.moduleSessionIndex.set(key, bucket);
+  private trackModuleSessions(session: PreviewSession): void {
+    for (const candidate of session.moduleCandidates) {
+      const key = vscode.Uri.file(candidate).toString();
+      session.trackedModuleUris.add(key);
+      let bucket = this.moduleSessionIndex.get(key);
+      if (!bucket) {
+        bucket = new Set();
+        this.moduleSessionIndex.set(key, bucket);
+      }
+      bucket.add(session);
     }
-    bucket.add(session);
   }
 
-  private untrackModuleSession(session: PreviewSession): void {
-    const key = session.moduleUri.toString();
-    const bucket = this.moduleSessionIndex.get(key);
-    if (!bucket) {
-      return;
+  private untrackModuleSessions(session: PreviewSession): void {
+    for (const key of session.trackedModuleUris) {
+      const bucket = this.moduleSessionIndex.get(key);
+      if (!bucket) {
+        continue;
+      }
+      bucket.delete(session);
+      if (bucket.size === 0) {
+        this.moduleSessionIndex.delete(key);
+      }
     }
-    bucket.delete(session);
-    if (bucket.size === 0) {
-      this.moduleSessionIndex.delete(key);
-    }
+    session.trackedModuleUris.clear();
   }
 
   private trackPartialSession(session: PreviewSession, filePath: string): void {
@@ -589,8 +641,9 @@ export class HandlebarsPreviewManager implements vscode.Disposable {
       return path.normalize(targetPath);
     }
 
-    return path.normalize(
-      path.resolve(path.dirname(session.modulePath), targetPath)
-    );
+    const baseDir = session.activeModulePath
+      ? path.dirname(session.activeModulePath)
+      : path.dirname(session.templateUri.fsPath);
+    return path.normalize(path.resolve(baseDir, targetPath));
   }
 }

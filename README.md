@@ -1,8 +1,8 @@
 # Handlebars Preview Plus
 
-Render Handlebars templates directly inside VS Code. Every `.hbs` or `.handlebars` file can be paired with a JavaScript module whose filename is the template filename plus `.js`; that module prepares input data, registers helpers/partials, and can perform optional pre/post processing before the preview updates.
+Render Handlebars templates directly inside VS Code. Every `.hbs` or `.handlebars` file can be paired with an optional JavaScript or TypeScript module whose filename is the template filename plus `.js` or `.ts`; that module prepares input data, registers helpers/partials, and can perform optional pre/post processing before the preview updates.
 
-![Handlebars Preview Plus demo](./shoecase.webp)
+![Handlebars Preview Plus demo](./showcase.webp)
 
 ## Feature Highlights
 
@@ -10,15 +10,17 @@ Render Handlebars templates directly inside VS Code. Every `.hbs` or `.handlebar
 - Companion modules can return async data, register helpers/partials, and transform the source before or after rendering.
 - File-backed partials reload instantly—even when the partial is unsaved but open in the editor.
 - Manual refresh command for long-running tasks or external side effects.
+- Preview still renders if you skip the companion module, using the raw template with empty data by default.
+- Supports `.hbs.js` and `.hbs.ts` companions—TypeScript modules compile using your workspace `tsconfig.json`.
 
 ## Quick Start
 
 1. Open a Handlebars template such as `email.hbs` in VS Code.
-2. Create a companion module named `email.hbs.js` (append `.js` to the full template filename).
+2. (Optional) Create a companion module named `email.hbs.js` or `email.hbs.ts` (append `.js` or `.ts` to the full template filename).
 3. Export either an object or a function from the module; return the configuration described below.
 4. Run **Handlebars Preview Plus: Open Handlebars Preview Plus** from the command palette, the editor title bar, or the Explorer context menu.
 
-### Minimal example
+### Minimal TypeScript example
 
 `email.hbs`
 
@@ -26,6 +28,35 @@ Render Handlebars templates directly inside VS Code. Every `.hbs` or `.handlebar
 <h1>{{title}}</h1>
 <p>Hello {{recipient.firstName}}!</p>
 ```
+
+`email.hbs.ts`
+
+```ts
+type Recipient = {
+  firstName: string;
+};
+
+interface EmailContext {
+  title: string;
+  recipient: Recipient;
+}
+
+export default function buildEmail() {
+  const data: EmailContext = {
+    title: "Welcome",
+    recipient: { firstName: "Ada" },
+  };
+
+  return {
+    title: "Sample Email",
+    data,
+  };
+}
+```
+
+The module’s default export can return the preview recipe object directly. The TypeScript compiler settings come from the nearest `tsconfig.json` in your workspace, and the extension forces CommonJS output under the hood.
+
+### Minimal JavaScript example
 
 `email.hbs.js`
 
@@ -241,6 +272,7 @@ Ready-to-run sample projects live in `examples/`:
 
 - `examples/newsletter/` mirrors the markdown helper + layout partial walkthrough (install `marked` locally to render markdown).
 - `examples/invoice/` shows an API-backed invoice with shared partials and a watched JSON payload.
+- `examples/typescript/` demonstrates a `.hbs.ts` companion module compiled with the workspace TypeScript configuration.
 
 Open any template from those folders and run **Handlebars Preview Plus: Open Handlebars Preview Plus** to explore the features.
 
@@ -259,23 +291,28 @@ Commands are also available from the editor title menu, editor context menu, and
 - Large helper dependencies (like `marked`) are fine—just import lazily as shown above so cold starts stay fast.
 - Use `watchFiles` when external processes (e.g., build step producing JSON) should trigger preview refreshes.
 - Toggle `handlebars-preview-plus.enableDebugLogging` for verbose output in the “Handlebars Preview Plus” output channel when debugging watcher behaviour.
+- TypeScript companions follow the nearest `tsconfig.json`; ensure project settings emit CommonJS-friendly code (the extension forces `module: commonjs`).
 
 ## Credits
 
 Every line of this extension—including source code, tests, documentation, and configuration—was generated with GitHub Copilot Chat (GPT-5 Codex).
 
-## Release Notes
+## Changelog
 
-### Unreleased
+### 0.0.3 · 2025-11-12
 
-- GitHub Actions workflow for lint, compile, and test validation.
-- Optional debug logging switch and annotated output channel.
-- Sample templates in `examples/` plus automated tests for dirty override scenarios.
-- Renamed the extension to Handlebars Preview Plus with updated commands and settings keys.
+- Companion module now optional—templates render even when no `.hbs.js`/`.hbs.ts` file exists.
+- TypeScript companions load through the workspace `tsconfig.json`, unlocking `.hbs.ts` files.
+- Added optional debug logging, new `examples/` recipes (newsletter, invoice, TypeScript), and corresponding automated tests.
+- CI pipeline now runs lint, compile, and test on every push and pull request.
 
-### 0.0.1
+### 0.0.2 · 2025-11-04
 
-- Initial preview implementation with data modules, helpers, partials (including file-backed partials), preprocess/postprocess hooks, and manual refresh support.
+- Refreshed documentation and screenshots ahead of the 0.0.2 marketplace publish.
+
+### 0.0.1 · 2025-11-04
+
+- Initial preview implementation with companion data modules, helper/partial support (including file-backed partials), preprocess/postprocess hooks, live partial watching, and manual refresh.
 
 ## License
 

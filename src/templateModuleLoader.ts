@@ -8,6 +8,7 @@ import type {
   TemplatePartialFileReference,
   TemplatePreviewRecipe,
 } from "./types";
+import { transpileTypeScriptModule } from "./tsCompiler";
 
 declare const __non_webpack_require__: NodeRequire | undefined;
 
@@ -27,15 +28,10 @@ type ModuleConstructorWithStatics = {
   _nodeModulePaths?: (from: string) => string[];
 };
 
-export class MissingTemplateModuleError extends Error {
-  constructor(public readonly modulePath: string) {
-    super(`Companion module not found: ${modulePath}`);
-  }
-}
-
 export interface TemplateRecipeLoadOptions {
   moduleSource?: string;
   partialSourceOverrides?: Record<string, string>;
+  workspaceFolder?: string;
 }
 
 export async function loadTemplateRecipe(
@@ -47,10 +43,14 @@ export async function loadTemplateRecipe(
   const exists =
     moduleSourceOverride !== undefined ? true : await fileExists(modulePath);
   if (!exists) {
-    throw new MissingTemplateModuleError(modulePath);
+    throw new Error(`Companion module not found: ${modulePath}`);
   }
 
-  const raw = await loadModuleExports(modulePath, moduleSourceOverride);
+  const raw = await loadModuleExports(
+    modulePath,
+    moduleSourceOverride,
+    options?.workspaceFolder ?? context.workspaceFolder
+  );
   const recipe = await resolveRecipe(raw, context, 0);
 
   const resolvedHelpers = await resolveMaybeFactory(
@@ -105,8 +105,22 @@ export async function loadTemplateRecipe(
 
 async function loadModuleExports(
   modulePath: string,
-  moduleSourceOverride?: string
+  moduleSourceOverride: string | undefined,
+  workspaceFolder?: string
 ): Promise<unknown> {
+  const extension = path.extname(modulePath).toLowerCase();
+
+  if (extension === ".ts") {
+    const source =
+      moduleSourceOverride ?? (await fs.readFile(modulePath, "utf8"));
+    const transpiled = transpileTypeScriptModule(
+      source,
+      modulePath,
+      workspaceFolder
+    );
+    return loadModuleFromSource(modulePath, transpiled);
+  }
+
   if (moduleSourceOverride !== undefined) {
     return loadModuleFromSource(modulePath, moduleSourceOverride);
   }
