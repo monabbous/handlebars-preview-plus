@@ -42,6 +42,7 @@ export interface ResolvedTemplatePreviewRecipe {
   postprocess?: TemplateProcessor;
   watchFiles: string[];
   partialFiles: Record<string, string>;
+  moduleDependencies: string[];
 }
 
 export interface TemplatePartialFileReference {

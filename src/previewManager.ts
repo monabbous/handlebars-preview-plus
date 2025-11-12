@@ -17,6 +17,7 @@ interface PreviewSession {
   readonly panel: vscode.WebviewPanel;
   readonly moduleCandidates: string[];
   readonly trackedModuleUris: Set<string>;
+  readonly moduleDependencies: Set<string>;
   moduleWatchers: vscode.Disposable[];
   activeModulePath?: string;
   extraWatchers: vscode.Disposable[];
@@ -116,6 +117,7 @@ export class HandlebarsPreviewManager implements vscode.Disposable {
       panel,
       moduleCandidates,
       trackedModuleUris: new Set(),
+      moduleDependencies: new Set(),
       moduleWatchers: [],
       extraWatchers: [],
       fsWatchers: [],
@@ -234,11 +236,16 @@ export class HandlebarsPreviewManager implements vscode.Disposable {
       const recipe = moduleSelection
         ? await loadTemplateRecipe(moduleSelection.path, context, {
             moduleSource: moduleSelection.source,
+            moduleSourceOverrides: dirtyOverrides,
             partialSourceOverrides: dirtyOverrides,
             workspaceFolder: context.workspaceFolder,
           })
         : this.createDefaultRecipe();
 
+      this.updateModuleDependencyTracking(
+        session,
+        recipe.moduleDependencies
+      );
       this.updateAdditionalWatchers(
         session,
         recipe.watchFiles,
@@ -372,6 +379,7 @@ export class HandlebarsPreviewManager implements vscode.Disposable {
       postprocess: undefined,
       watchFiles: [],
       partialFiles: {},
+      moduleDependencies: [],
     };
   }
 
@@ -569,14 +577,7 @@ export class HandlebarsPreviewManager implements vscode.Disposable {
 
   private trackModuleSessions(session: PreviewSession): void {
     for (const candidate of session.moduleCandidates) {
-      const key = vscode.Uri.file(candidate).toString();
-      session.trackedModuleUris.add(key);
-      let bucket = this.moduleSessionIndex.get(key);
-      if (!bucket) {
-        bucket = new Set();
-        this.moduleSessionIndex.set(key, bucket);
-      }
-      bucket.add(session);
+      this.trackModulePath(session, candidate);
     }
   }
 
@@ -592,6 +593,72 @@ export class HandlebarsPreviewManager implements vscode.Disposable {
       }
     }
     session.trackedModuleUris.clear();
+  }
+
+  private trackModulePath(
+    session: PreviewSession,
+    filePath: string
+  ): void {
+    const normalized = path.normalize(filePath);
+    const key = vscode.Uri.file(normalized).toString();
+    session.trackedModuleUris.add(key);
+    let bucket = this.moduleSessionIndex.get(key);
+    if (!bucket) {
+      bucket = new Set();
+      this.moduleSessionIndex.set(key, bucket);
+    }
+    bucket.add(session);
+  }
+
+  private updateModuleDependencyTracking(
+    session: PreviewSession,
+    dependencies: string[]
+  ): void {
+    const normalizedDependencies = new Set(
+      dependencies.map((dependency) => path.normalize(dependency))
+    );
+
+    for (const existing of Array.from(session.moduleDependencies)) {
+      if (!normalizedDependencies.has(existing)) {
+        this.untrackModuleDependency(session, existing);
+      }
+    }
+
+    for (const dependency of normalizedDependencies) {
+      if (!session.moduleDependencies.has(dependency)) {
+        this.trackModuleDependency(session, dependency);
+      }
+    }
+  }
+
+  private trackModuleDependency(
+    session: PreviewSession,
+    filePath: string
+  ): void {
+    const normalized = path.normalize(filePath);
+    session.moduleDependencies.add(normalized);
+    this.trackModulePath(session, normalized);
+  }
+
+  private untrackModuleDependency(
+    session: PreviewSession,
+    filePath: string
+  ): void {
+    const normalized = path.normalize(filePath);
+    if (!session.moduleDependencies.delete(normalized)) {
+      return;
+    }
+
+    const key = vscode.Uri.file(normalized).toString();
+    const bucket = this.moduleSessionIndex.get(key);
+    if (bucket) {
+      bucket.delete(session);
+      if (bucket.size === 0) {
+        this.moduleSessionIndex.delete(key);
+      }
+    }
+
+    session.trackedModuleUris.delete(key);
   }
 
   private trackPartialSession(session: PreviewSession, filePath: string): void {

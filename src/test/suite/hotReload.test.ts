@@ -14,6 +14,29 @@ suite("Hot reload integration", () => {
   const tsDir = path.join(repoRoot, "examples", "typescript");
   const tsTemplatePath = path.join(tsDir, "sample.hbs");
   const tsModulePath = path.join(tsDir, "sample.hbs.ts");
+  const tsRelativeDir = path.join(
+    repoRoot,
+    "examples",
+    "typescript-relative",
+    "templates",
+    "nested"
+  );
+  const tsRelativeTemplatePath = path.join(tsRelativeDir, "email.hbs");
+  const tsRelativeModulePath = path.join(tsRelativeDir, "email.hbs.ts");
+  const tsRelativeHelperPath = path.join(
+    repoRoot,
+    "examples",
+    "typescript-relative",
+    "sanitizeEmailHtml.ts"
+  );
+  const tsNodeModuleDir = path.join(
+    repoRoot,
+    "examples",
+    "typescript-node-module",
+    "templates"
+  );
+  const tsNodeModuleTemplatePath = path.join(tsNodeModuleDir, "email.hbs");
+  const tsNodeModuleModulePath = path.join(tsNodeModuleDir, "email.hbs.ts");
 
   const context: ProcessingContext = {
     templatePath,
@@ -24,6 +47,18 @@ suite("Hot reload integration", () => {
   const tsContext: ProcessingContext = {
     templatePath: tsTemplatePath,
     modulePath: tsModulePath,
+    workspaceFolder: repoRoot,
+  };
+
+  const tsRelativeContext: ProcessingContext = {
+    templatePath: tsRelativeTemplatePath,
+    modulePath: tsRelativeModulePath,
+    workspaceFolder: repoRoot,
+  };
+
+  const tsNodeModuleContext: ProcessingContext = {
+    templatePath: tsNodeModuleTemplatePath,
+    modulePath: tsNodeModuleModulePath,
     workspaceFolder: repoRoot,
   };
 
@@ -89,5 +124,49 @@ export default function overridePreview() {
     const data = recipe.data as { title?: string; message?: string };
     assert.equal(data.title, "TS Override");
     assert.equal(data.message, "Dirty override");
+  });
+
+  test("resolves relative TypeScript dependencies", async () => {
+    const recipe = await loadTemplateRecipe(
+      tsRelativeModulePath,
+      tsRelativeContext
+    );
+
+    const templateSource = await fs.readFile(
+      tsRelativeTemplatePath,
+      "utf8"
+    );
+    const rendered = await renderTemplate(
+      templateSource,
+      recipe,
+      tsRelativeContext
+    );
+
+    assert.ok(rendered.includes("::sanitized::"));
+    assert.ok(
+      recipe.moduleDependencies.some(
+        (dependency) =>
+          path.normalize(dependency) === path.normalize(tsRelativeHelperPath)
+      )
+    );
+  });
+
+  test("resolves node_module dependencies from TypeScript companions", async () => {
+    const recipe = await loadTemplateRecipe(
+      tsNodeModuleModulePath,
+      tsNodeModuleContext
+    );
+
+    const templateSource = await fs.readFile(
+      tsNodeModuleTemplatePath,
+      "utf8"
+    );
+    const rendered = await renderTemplate(
+      templateSource,
+      recipe,
+      tsNodeModuleContext
+    );
+
+    assert.ok(rendered.includes("::example-sanitized::"));
   });
 });

@@ -1,8 +1,8 @@
 import * as path from "node:path";
 import * as ts from "typescript";
 
-const compilerOptionsCache = new Map<string, ts.CompilerOptions>();
 const configLookupCache = new Map<string, string | null>();
+const compilerContextCache = new Map<string, CompilerContext>();
 
 const DEFAULT_COMPILER_OPTIONS: ts.CompilerOptions = {
   module: ts.ModuleKind.CommonJS,
@@ -14,20 +14,27 @@ const DEFAULT_COMPILER_OPTIONS: ts.CompilerOptions = {
   skipLibCheck: true,
 };
 
+interface CompilerContext {
+  options: ts.CompilerOptions;
+  baseDir: string;
+  resolutionCache: ts.ModuleResolutionCache;
+  originalRootDir?: string;
+}
+
 export function transpileTypeScriptModule(
   source: string,
   filePath: string,
   workspaceFolder?: string
 ): string {
-  const compilerOptions = getCompilerOptions(filePath, workspaceFolder);
+  const context = getCompilerContext(filePath, workspaceFolder);
   const transpiled = ts.transpileModule(source, {
-    compilerOptions,
+    compilerOptions: context.options,
     fileName: filePath,
     reportDiagnostics: true,
   });
 
   if (transpiled.diagnostics && transpiled.diagnostics.length > 0) {
-    const host = createDiagnosticHost(workspaceFolder ?? path.dirname(filePath));
+    const host = createDiagnosticHost(context.baseDir);
     const formatted = ts.formatDiagnostics(transpiled.diagnostics, host);
     throw new Error(
       `Failed to compile TypeScript companion module at ${filePath}:\n${formatted}`
@@ -37,23 +44,76 @@ export function transpileTypeScriptModule(
   return transpiled.outputText;
 }
 
-function getCompilerOptions(
-  filePath: string,
+export function resolveTypeScriptImport(
+  moduleName: string,
+  containingFile: string,
   workspaceFolder?: string
-): ts.CompilerOptions {
-  const configPath = findTsConfigPath(filePath, workspaceFolder);
-  if (!configPath) {
-    return { ...DEFAULT_COMPILER_OPTIONS };
+): string | undefined {
+  const context = getCompilerContext(containingFile, workspaceFolder);
+  const host = createModuleResolutionHost(context.baseDir);
+  const resolution = ts.resolveModuleName(
+    moduleName,
+    containingFile,
+    context.options,
+    host,
+    context.resolutionCache
+  );
+
+  const resolved = resolution.resolvedModule;
+  if (!resolved || !resolved.resolvedFileName) {
+    return undefined;
   }
 
-  const cached = compilerOptionsCache.get(configPath);
-  if (cached) {
-    return cached;
+  if (resolved.extension === ts.Extension.Dts) {
+    return undefined;
+  }
+
+  return resolved.resolvedFileName;
+}
+
+function getCompilerContext(
+  filePath: string,
+  workspaceFolder?: string
+): CompilerContext {
+  const configPath = findTsConfigPath(filePath, workspaceFolder);
+  if (!configPath) {
+    const baseDir = workspaceFolder
+      ? path.resolve(workspaceFolder)
+      : path.dirname(filePath);
+    const cacheKey = `default::${baseDir}`;
+    const cached = compilerContextCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const options = { ...DEFAULT_COMPILER_OPTIONS };
+    const resolutionCache = createModuleResolutionCache(baseDir, options);
+    const context: CompilerContext = { options, baseDir, resolutionCache };
+    compilerContextCache.set(cacheKey, context);
+    return context;
+  }
+
+  const normalizedConfigPath = path.normalize(configPath);
+  const baseDir = path.dirname(normalizedConfigPath);
+  const baseKey = `config::${normalizedConfigPath}`;
+  const rootlessKey = `${baseKey}::noRootDir`;
+
+  const cachedBase = compilerContextCache.get(baseKey);
+  if (
+    cachedBase &&
+    (!cachedBase.originalRootDir ||
+      isWithinDirectory(filePath, cachedBase.originalRootDir))
+  ) {
+    return cachedBase;
+  }
+
+  const cachedRootless = compilerContextCache.get(rootlessKey);
+  if (cachedRootless) {
+    return cachedRootless;
   }
 
   const host = ts.sys;
-  const configFile = ts.readConfigFile(configPath, host.readFile);
-  const baseDir = path.dirname(configPath);
+  const configFile = ts.readConfigFile(normalizedConfigPath, host.readFile);
   const diagnosticHost = createDiagnosticHost(baseDir);
 
   if (configFile.error) {
@@ -75,16 +135,51 @@ function getCompilerOptions(
     module: ts.ModuleKind.CommonJS,
   };
 
+  let cacheKey = baseKey;
+  let originalRootDir: string | undefined;
+
   if (options.rootDir) {
-    const absoluteRoot = path.resolve(baseDir, options.rootDir);
-    if (!isWithinDirectory(filePath, absoluteRoot)) {
+    originalRootDir = path.resolve(baseDir, options.rootDir);
+    if (!isWithinDirectory(filePath, originalRootDir)) {
       const { rootDir, ...rest } = options;
       options = { ...rest };
+      cacheKey = rootlessKey;
     }
   }
 
-  compilerOptionsCache.set(configPath, options);
-  return options;
+  const resolutionCache = createModuleResolutionCache(baseDir, options);
+  const context: CompilerContext = {
+    options,
+    baseDir,
+    resolutionCache,
+    originalRootDir,
+  };
+  compilerContextCache.set(cacheKey, context);
+  return context;
+}
+
+function createModuleResolutionCache(
+  baseDir: string,
+  options: ts.CompilerOptions
+): ts.ModuleResolutionCache {
+  const getCanonicalFileName = ts.sys.useCaseSensitiveFileNames
+    ? (fileName: string) => fileName
+    : (fileName: string) => fileName.toLowerCase();
+
+  return ts.createModuleResolutionCache(baseDir, getCanonicalFileName, options);
+}
+
+function createModuleResolutionHost(
+  baseDir: string
+): ts.ModuleResolutionHost {
+  return {
+    fileExists: ts.sys.fileExists,
+    readFile: ts.sys.readFile,
+    directoryExists: ts.sys.directoryExists,
+    getDirectories: ts.sys.getDirectories,
+    realpath: ts.sys.realpath,
+    getCurrentDirectory: () => baseDir,
+  };
 }
 
 function findTsConfigPath(

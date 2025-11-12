@@ -12,6 +12,8 @@ Render Handlebars templates directly inside VS Code. Every `.hbs` or `.handlebar
 - Manual refresh command for long-running tasks or external side effects.
 - Preview still renders if you skip the companion module, using the raw template with empty data by default.
 - Supports `.hbs.js` and `.hbs.ts` companions—TypeScript modules compile using your workspace `tsconfig.json`.
+- TypeScript companions can import other `.ts` files in your workspace; the extension transpiles dependencies on demand, tracks the dependency graph, and hot-reloads unsaved edits.
+- TypeScript companions can require packages from your workspace `node_modules`, relying on the same resolution rules as your project.
 
 ## Quick Start
 
@@ -273,6 +275,8 @@ Ready-to-run sample projects live in `examples/`:
 - `examples/newsletter/` mirrors the markdown helper + layout partial walkthrough (install `marked` locally to render markdown).
 - `examples/invoice/` shows an API-backed invoice with shared partials and a watched JSON payload.
 - `examples/typescript/` demonstrates a `.hbs.ts` companion module compiled with the workspace TypeScript configuration.
+- `examples/typescript-relative/` imports a sibling TypeScript helper, showcasing cross-file TypeScript dependency support without a build step.
+- `examples/typescript-node-module/` loads a helper from `node_modules`, verifying that workspace dependencies are available to companions during preview and are watched for changes.
 
 Open any template from those folders and run **Handlebars Preview Plus: Open Handlebars Preview Plus** to explore the features.
 
@@ -292,6 +296,9 @@ Commands are also available from the editor title menu, editor context menu, and
 - Use `watchFiles` when external processes (e.g., build step producing JSON) should trigger preview refreshes.
 - Toggle `handlebars-preview-plus.enableDebugLogging` for verbose output in the “Handlebars Preview Plus” output channel when debugging watcher behaviour.
 - TypeScript companions follow the nearest `tsconfig.json`; ensure project settings emit CommonJS-friendly code (the extension forces `module: commonjs`).
+- Relative TypeScript imports do not require a bundler—the extension resolves and transpiles `.ts` dependencies automatically during preview.
+- Bare specifiers (`import x from "some-package"`) resolve the same way as your project does, including support for workspace `node_modules`.
+- Imported TypeScript helpers (and workspace packages pulling in `.ts` sources) are watched automatically, so unsaved edits in those files immediately trigger preview refreshes.
 
 ## Credits
 
@@ -303,6 +310,8 @@ Every line of this extension—including source code, tests, documentation, and 
 
 - Companion module now optional—templates render even when no `.hbs.js`/`.hbs.ts` file exists.
 - TypeScript companions load through the workspace `tsconfig.json`, unlocking `.hbs.ts` files.
+- Relative TypeScript helpers are compiled on demand, so companions can import local `.ts` utilities without a build step.
+- TypeScript companions can import packages from `node_modules`, mirroring project module resolution during preview.
 - Added optional debug logging, new `examples/` recipes (newsletter, invoice, TypeScript), and corresponding automated tests.
 - CI pipeline now runs lint, compile, and test on every push and pull request.
 

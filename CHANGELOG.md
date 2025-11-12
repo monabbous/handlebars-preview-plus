@@ -13,8 +13,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Companion module now optional; templates render even when no companion file exists.
 - TypeScript companion modules compiled with the workspace tsconfig (supports `.hbs.ts` files).
 - Optional `handlebars-preview-plus.enableDebugLogging` setting and output channel logging.
-- Sample projects in `examples/` covering markdown helpers, invoice previews, and a TypeScript companion module.
+- Sample projects in `examples/` covering markdown helpers, invoice previews, a baseline TypeScript companion, and new scenarios for relative helpers and workspace `node_modules` imports.
 - Extension-host tests that assert dirty module and partial overrides are respected, plus coverage for TypeScript companions.
+- TypeScript companions can import additional `.ts` helpers via on-demand transpilation, and those dependencies are now watched for hot reloads.
+- TypeScript companions can load dependencies from workspace `node_modules`, matching project resolution semantics.
 - GitHub Actions CI workflow running lint, compile, and test on every push and pull request.
 
 ### Changed
